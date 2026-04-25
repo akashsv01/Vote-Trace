@@ -2,6 +2,7 @@ import { useState } from "react";
 import AddressInput from "./components/AddressInput.jsx";
 import RepCard from "./components/RepCard.jsx";
 import VoteList from "./components/VoteList.jsx";
+import PersonalizePanel from "./components/PersonalizePanel.jsx";
 
 export default function App() {
   const [reps, setReps] = useState(null);
@@ -10,6 +11,8 @@ export default function App() {
 
   const [expandedBioguide, setExpandedBioguide] = useState(null);
   const [votesByBioguide, setVotesByBioguide] = useState({});
+
+  const [userContext, setUserContext] = useState("");
 
   async function handleAddressSubmit(address) {
     setLoadingReps(true);
@@ -119,32 +122,36 @@ export default function App() {
         )}
 
         {sortedReps && sortedReps.length > 0 && (
-          <section className="reps-section">
-            <h2 className="section-heading">Your federal representatives</h2>
-            <div className="reps-grid">
-              {sortedReps.map((rep) => {
-                const id = rep.bioguide_id || rep.name;
-                const isExpanded = expandedBioguide === id;
-                const voteState = votesByBioguide[id] || {};
-                return (
-                  <RepCard
-                    key={id}
-                    rep={rep}
-                    expanded={isExpanded}
-                    onToggle={() => handleToggleRep(rep)}
-                  >
-                    <VoteList
-                      votes={voteState.votes}
-                      source={voteState.source}
-                      repName={rep.name}
-                      loading={voteState.loading}
-                      error={voteState.error}
-                    />
-                  </RepCard>
-                );
-              })}
-            </div>
-          </section>
+          <>
+            <PersonalizePanel value={userContext} onChange={setUserContext} />
+            <section className="reps-section">
+              <h2 className="section-heading">Your federal representatives</h2>
+              <div className="reps-grid">
+                {sortedReps.map((rep) => {
+                  const id = rep.bioguide_id || rep.name;
+                  const isExpanded = expandedBioguide === id;
+                  const voteState = votesByBioguide[id] || {};
+                  return (
+                    <RepCard
+                      key={id}
+                      rep={rep}
+                      expanded={isExpanded}
+                      onToggle={() => handleToggleRep(rep)}
+                    >
+                      <VoteList
+                        votes={voteState.votes}
+                        source={voteState.source}
+                        repName={rep.name}
+                        userContext={userContext}
+                        loading={voteState.loading}
+                        error={voteState.error}
+                      />
+                    </RepCard>
+                  );
+                })}
+              </div>
+            </section>
+          </>
         )}
       </main>
 

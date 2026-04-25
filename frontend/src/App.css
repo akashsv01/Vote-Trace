@@ -451,6 +451,151 @@ button {
   color: var(--ink-faint);
 }
 
+/* Personalize panel */
+.personalize {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  margin-bottom: 16px;
+  box-shadow: var(--shadow);
+  overflow: hidden;
+  transition: border-color 0.15s;
+}
+
+.personalize.filled {
+  border-color: #c7a93a;
+  background: linear-gradient(180deg, #fffbed 0%, #fffaf0 100%);
+}
+
+.personalize-header {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 16px;
+  background: transparent;
+  border: none;
+  text-align: left;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--ink);
+  cursor: pointer;
+}
+
+.personalize-header:hover {
+  background: rgba(0, 0, 0, 0.02);
+}
+
+.personalize-title {
+  flex: 1;
+}
+
+.personalize-pill {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  background: #f0c000;
+  color: #5a4500;
+  padding: 2px 7px;
+  border-radius: 999px;
+}
+
+.personalize-body {
+  padding: 0 16px 16px;
+  border-top: 1px solid var(--border);
+}
+
+.personalize-help {
+  font-size: 13px;
+  color: var(--ink-soft);
+  margin: 12px 0 10px;
+  line-height: 1.5;
+}
+
+.personalize-textarea {
+  width: 100%;
+  min-height: 80px;
+  padding: 10px 12px;
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  font-family: inherit;
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--ink);
+  background: var(--bg-card);
+  resize: vertical;
+  outline: none;
+  transition:
+    border-color 0.1s,
+    box-shadow 0.1s;
+}
+
+.personalize-textarea:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(26, 68, 128, 0.1);
+}
+
+.personalize-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: 8px;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.personalize-examples {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.personalize-examples-label {
+  font-size: 12px;
+  color: var(--ink-faint);
+}
+
+.personalize-example {
+  background: transparent;
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  padding: 3px 10px;
+  font-size: 12px;
+  color: var(--ink-soft);
+  cursor: pointer;
+  transition:
+    background 0.1s,
+    border-color 0.1s;
+}
+
+.personalize-example:hover {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.personalize-count {
+  font-size: 11px;
+  color: var(--ink-faint);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Personal impact section in explanation */
+.personal-impact {
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px dashed var(--border);
+}
+
+.personal-label {
+  display: inline-flex !important;
+  align-items: center;
+  gap: 4px;
+  color: #b88800 !important;
+}
+
 @media (max-width: 600px) {
   .app-header {
     padding: 32px 16px 16px;

@@ -101,6 +101,7 @@ class ExplainRequest(BaseModel):
     bill_description: str
     vote_position: str
     rep_name: str
+    user_context: Optional[str] = None
 
 
 # ---------- /reps ----------
@@ -390,7 +391,17 @@ SYSTEM_PROMPT = (
     "Explain legislation in plain language so an average American can understand what "
     "the bill would actually do in concrete terms. Never editorialize. Never imply a "
     "vote was good or bad. Be factual and neutral. Avoid loaded words. Do not mention "
-    "the political party of the representative. Keep your response to 2-3 sentences."
+    "the political party of the representative. "
+    "Output rules: "
+    "1) Always start with a section called WHAT IT DOES with 2-3 plain-language sentences "
+    "describing the bill's actual effect. "
+    "2) If, AND ONLY IF, the user provides personal context, also include a second section "
+    "called PERSONAL IMPACT with 1-2 sentences describing how the bill might directly "
+    "affect someone with that context. Be specific to their situation, but only state "
+    "effects that are actually plausible from the bill text. If the bill has no realistic "
+    "personal effect on this person, say so plainly in PERSONAL IMPACT. "
+    "Format each section as: 'WHAT IT DOES: <text>' on one line, then 'PERSONAL IMPACT: "
+    "<text>' on the next line. Do not add extra commentary or headings."
 )
 
 
@@ -399,18 +410,29 @@ async def explain_vote(req: ExplainRequest):
     if anthropic_client is None:
         raise HTTPException(status_code=500, detail="ANTHROPIC_API_KEY not set")
 
-    user_prompt = (
-        f"Bill: {req.bill_title}\n"
-        f"Official description: {req.bill_description}\n"
-        f"{req.rep_name} voted: {req.vote_position}\n\n"
-        "In 2-3 sentences, explain in plain language what this bill would do and why it "
-        "matters to ordinary people. Do not say whether the vote was good or bad."
-    )
+    user_context = (req.user_context or "").strip()
+
+    user_prompt_lines = [
+        f"Bill: {req.bill_title}",
+        f"Official description: {req.bill_description}",
+        f"{req.rep_name} voted: {req.vote_position}",
+    ]
+    if user_context:
+        user_prompt_lines.append("")
+        user_prompt_lines.append(f"User personal context: {user_context}")
+        user_prompt_lines.append(
+            "Produce both WHAT IT DOES and PERSONAL IMPACT sections."
+        )
+    else:
+        user_prompt_lines.append("")
+        user_prompt_lines.append(
+            "No personal context provided. Produce WHAT IT DOES only."
+        )
 
     try:
         msg = await anthropic_client.messages.create(
             model="claude-haiku-4-5-20251001",
-            max_tokens=400,
+            max_tokens=500,
             system=[
                 {
                     "type": "text",
@@ -418,13 +440,37 @@ async def explain_vote(req: ExplainRequest):
                     "cache_control": {"type": "ephemeral"},
                 }
             ],
-            messages=[{"role": "user", "content": user_prompt}],
+            messages=[{"role": "user", "content": "\n".join(user_prompt_lines)}],
         )
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"Anthropic error: {e}")
 
-    text = "".join(block.text for block in msg.content if getattr(block, "type", None) == "text")
-    return {"explanation": text.strip()}
+    raw = "".join(block.text for block in msg.content if getattr(block, "type", None) == "text").strip()
+
+    # Split sections. Be tolerant of variations.
+    what_it_does = raw
+    personal_impact = ""
+    upper = raw.upper()
+    pi_idx = upper.find("PERSONAL IMPACT:")
+    if pi_idx != -1:
+        what_part = raw[:pi_idx].strip()
+        personal_part = raw[pi_idx + len("PERSONAL IMPACT:"):].strip()
+        # Strip leading "WHAT IT DOES:" if present
+        wit_upper = what_part.upper()
+        wit_idx = wit_upper.find("WHAT IT DOES:")
+        if wit_idx != -1:
+            what_part = what_part[wit_idx + len("WHAT IT DOES:"):].strip()
+        what_it_does = what_part
+        personal_impact = personal_part
+    else:
+        wit_upper = upper.find("WHAT IT DOES:")
+        if wit_upper != -1:
+            what_it_does = raw[wit_upper + len("WHAT IT DOES:"):].strip()
+
+    return {
+        "explanation": what_it_does,
+        "personal_impact": personal_impact,
+    }
 
 
 @app.get("/health")

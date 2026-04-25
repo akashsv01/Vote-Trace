@@ -1,6 +1,13 @@
 import VoteItem from "./VoteItem.jsx";
 
-export default function VoteList({ votes, source, repName, loading, error }) {
+export default function VoteList({
+  votes,
+  source,
+  repName,
+  userContext,
+  loading,
+  error,
+}) {
   if (loading) {
     return <div className="vote-list-state">Loading recent votes...</div>;
   }
@@ -20,7 +27,12 @@ export default function VoteList({ votes, source, repName, loading, error }) {
       )}
       <ul className="vote-list">
         {votes.map((v) => (
-          <VoteItem key={v.bill_id} vote={v} repName={repName} />
+          <VoteItem
+            key={v.bill_id}
+            vote={v}
+            repName={repName}
+            userContext={userContext}
+          />
         ))}
       </ul>
     </div>
