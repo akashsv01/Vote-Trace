@@ -10,7 +10,10 @@ Three endpoints, mirroring the MVP spec:
 from __future__ import annotations
 
 import asyncio
+import datetime
 import os
+import re
+import xml.etree.ElementTree as ET
 from contextlib import asynccontextmanager
 from typing import Optional
 
@@ -63,6 +66,10 @@ def bioguide_photo_url(bioguide_id: str) -> str:
 
 CURRENT_CONGRESS = 119
 CURRENT_SESSION = 2
+
+SENATE_UA = "MyRepVotingRecord/1.0 (civic education project)"
+SENATE_LIST_URL = "https://www.senate.gov/legislative/LIS/roll_call_lists/vote_menu_{congress}_{session}.xml"
+SENATE_VOTE_URL = "https://www.senate.gov/legislative/LIS/roll_call_votes/vote{congress}{session}/vote_{congress}_{session}_{vote:05d}.xml"
 
 http_client: Optional[httpx.AsyncClient] = None
 anthropic_client: Optional[AsyncAnthropic] = None
@@ -313,6 +320,138 @@ def _normalize_position(raw: Optional[str]) -> str:
     return "Not Voting"
 
 
+def _parse_senate_vote_date(raw: str) -> str:
+    if not raw:
+        return ""
+    m = re.match(r"\s*([A-Za-z]+ \d+,\s*\d{4})", raw)
+    if not m:
+        return raw[:10]
+    cleaned = re.sub(r"\s+", " ", m.group(1))
+    try:
+        dt = datetime.datetime.strptime(cleaned, "%B %d, %Y")
+        return dt.strftime("%Y-%m-%d")
+    except ValueError:
+        return raw[:10]
+
+
+def _senate_vote_position(raw: str) -> str:
+    if not raw:
+        return "Not Voting"
+    r = raw.strip().lower()
+    if r in ("yea", "aye", "yes"):
+        return "Yes"
+    if r in ("nay", "no"):
+        return "No"
+    if r == "present":
+        return "Present"
+    return "Not Voting"
+
+
+def _last_name(full_name: str) -> str:
+    """Extract a comparable last name from a legislator's full name."""
+    cleaned = re.sub(r",.*$", "", full_name or "").strip()
+    parts = cleaned.split()
+    if not parts:
+        return ""
+    suffixes = {"jr.", "jr", "sr.", "sr", "iii", "ii", "iv"}
+    while len(parts) > 1 and parts[-1].lower() in suffixes:
+        parts.pop()
+    return parts[-1].lower()
+
+
+async def _fetch_senate_votes(bioguide_id: str, congress: int, session: int, limit: int = 10):
+    assert http_client is not None
+    legislator = get_legislator(bioguide_id)
+    if not legislator:
+        return None
+    senator_last = _last_name(legislator.get("name", ""))
+    senator_state = legislator.get("state", "")
+
+    list_url = SENATE_LIST_URL.format(congress=congress, session=session)
+    try:
+        r = await http_client.get(list_url, headers={"User-Agent": SENATE_UA})
+        r.raise_for_status()
+        list_root = ET.fromstring(r.content)
+    except (httpx.HTTPError, ET.ParseError) as e:
+        return None
+
+    votes_container = list_root.find("votes")
+    if votes_container is None:
+        return None
+
+    items = list(votes_container)[:limit]
+
+    async def fetch_one(item):
+        vote_num_str = item.findtext("vote_number") or ""
+        try:
+            vote_num = int(vote_num_str)
+        except ValueError:
+            return None
+        url = SENATE_VOTE_URL.format(congress=congress, session=session, vote=vote_num)
+        try:
+            rd = await http_client.get(url, headers={"User-Agent": SENATE_UA})
+            rd.raise_for_status()
+            detail = ET.fromstring(rd.content)
+        except (httpx.HTTPError, ET.ParseError):
+            return None
+
+        position = "Not Voting"
+        members = detail.find("members")
+        if members is not None:
+            for m in members:
+                last = (m.findtext("last_name") or "").lower()
+                state = m.findtext("state") or ""
+                if last == senator_last and state == senator_state:
+                    position = _senate_vote_position(m.findtext("vote_cast") or "")
+                    break
+
+        question = (detail.findtext("vote_question_text") or "").strip()
+        document_text = (detail.findtext("vote_document_text") or "").strip()
+        result_text = (detail.findtext("vote_result_text") or detail.findtext("vote_result") or "").strip()
+
+        doc_node = detail.find("document")
+        doc_short = (doc_node.findtext("document_short_title") if doc_node is not None else "") or ""
+        doc_title = (doc_node.findtext("document_title") if doc_node is not None else "") or ""
+
+        amendment_node = detail.find("amendment")
+        amend_purpose = (
+            amendment_node.findtext("amendment_purpose") if amendment_node is not None else ""
+        ) or ""
+
+        title_pieces = []
+        if doc_short:
+            title_pieces.append(doc_short)
+        elif document_text:
+            title_pieces.append(document_text[:140])
+        if question and not title_pieces:
+            title_pieces.append(question)
+        title = " — ".join(p for p in title_pieces if p) or "Senate roll-call vote"
+
+        desc_pieces = []
+        if document_text:
+            desc_pieces.append(document_text)
+        if doc_title and doc_title != doc_short:
+            desc_pieces.append(doc_title)
+        if amend_purpose:
+            desc_pieces.append(f"Amendment purpose: {amend_purpose}")
+        if question:
+            desc_pieces.append(f"Question before the Senate: {question}")
+        if result_text:
+            desc_pieces.append(f"Result: {result_text}")
+        description = " ".join(desc_pieces) or "No additional details available."
+
+        return {
+            "bill_id": f"senate-{congress}-{session}-{vote_num}",
+            "bill_title": title,
+            "bill_description": description,
+            "date": _parse_senate_vote_date(detail.findtext("vote_date") or ""),
+            "vote_position": position,
+        }
+
+    results = await asyncio.gather(*(fetch_one(i) for i in items))
+    return [v for v in results if v is not None]
+
+
 @app.get("/votes/{bioguide_id}")
 async def get_votes(bioguide_id: str):
     legislator = get_legislator(bioguide_id)
@@ -321,10 +460,15 @@ async def get_votes(bioguide_id: str):
 
     chamber = legislator["chamber"]
 
-    # api.congress.gov only publishes House roll-call votes.
-    # For Senate members we use the curated real-vote fallback set.
     if chamber == "senate":
-        return _empty_to_fallback("senate", reason="Senate votes not exposed by api.congress.gov v3")
+        votes = await _fetch_senate_votes(bioguide_id, CURRENT_CONGRESS, CURRENT_SESSION, limit=10)
+        if votes:
+            return {"votes": votes, "source": "live"}
+        # fall back to previous session if current is empty
+        votes = await _fetch_senate_votes(bioguide_id, CURRENT_CONGRESS, CURRENT_SESSION - 1, limit=10)
+        if votes:
+            return {"votes": votes, "source": "live"}
+        return _empty_to_fallback("senate", reason="Senate.gov XML feed returned no votes")
 
     if not CONGRESS_API_KEY:
         return _empty_to_fallback(chamber, reason="CONGRESS_API_KEY not set")
